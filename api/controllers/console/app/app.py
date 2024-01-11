@@ -40,11 +40,13 @@ class AppListApi(Resource):
     @marshal_with(app_pagination_fields)
     def get(self):
         """Get app list"""
+        return []
         parser = reqparse.RequestParser()
         parser.add_argument('page', type=inputs.int_range(1, 99999), required=False, default=1, location='args')
         parser.add_argument('limit', type=inputs.int_range(1, 100), required=False, default=20, location='args')
         parser.add_argument('mode', type=str, choices=['chat', 'completion', 'all'], default='all', location='args', required=False)
         args = parser.parse_args()
+
 
         filters = [
             App.tenant_id == current_user.current_tenant_id,
