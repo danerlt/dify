@@ -1,0 +1,44 @@
+identity:
+  name: webscraper
+  author: Dify
+  label:
+    en_US: Web Scraper
+    zh_Hans: 网页爬虫
+description:
+  human:
+    en_US: A tool for scraping webpages.
+    zh_Hans: 一个用于爬取网页的工具。
+  llm: A tool for scraping webpages. Input should be a URL.
+parameters:
+  - name: url
+    type: string
+    required: true
+    label:
+      en_US: URL
+      zh_Hans: 网页链接
+    human_description:
+      en_US: used for linking to webpages
+      zh_Hans: 用于链接到网页
+    llm_description: url for scraping
+    form: llm
+  - name: user_agent
+    type: string
+    required: false
+    label:
+      en_US: User Agent
+      zh_Hans: User Agent
+    human_description:
+      en_US: used for identifying the browser.
+      zh_Hans: 用于识别浏览器。
+    form: form
+    default: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.1000.0 Safari/537.36
+  - name: model
+    type: model
+    required: true
+    label:
+      en_US: Summary Model
+      zh_Hans: 总结模型
+    human_description:
+      en_US: when there is a text has a length reached LLM's limit, it will be summarized by this model.
+      zh_Hans: 当有一个文本的长度达到LLM的限制时，它将被这个模型总结。
+    form: form
