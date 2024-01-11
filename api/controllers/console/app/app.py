@@ -39,36 +39,32 @@ class AppListApi(Resource):
     @account_initialization_required
     @marshal_with(app_pagination_fields)
     def get(self):
-        try:
-            """Get app list"""
-            parser = reqparse.RequestParser()
-            parser.add_argument('page', type=inputs.int_range(1, 99999), required=False, default=1, location='args')
-            parser.add_argument('limit', type=inputs.int_range(1, 100), required=False, default=20, location='args')
-            parser.add_argument('mode', type=str, choices=['chat', 'completion', 'all'], default='all', location='args', required=False)
-            args = parser.parse_args()
+        """Get app list"""
+        parser = reqparse.RequestParser()
+        parser.add_argument('page', type=inputs.int_range(1, 99999), required=False, default=1, location='args')
+        parser.add_argument('limit', type=inputs.int_range(1, 100), required=False, default=20, location='args')
+        parser.add_argument('mode', type=str, choices=['chat', 'completion', 'all'], default='all', location='args', required=False)
+        args = parser.parse_args()
 
+        filters = [
+            App.tenant_id == current_user.current_tenant_id,
+        ]
 
-            filters = [
-                App.tenant_id == current_user.current_tenant_id,
-            ]
+        if args['mode'] == 'completion':
+            filters.append(App.mode == 'completion')
+        elif args['mode'] == 'chat':
+            filters.append(App.mode == 'chat')
+        else:
+            pass
 
-            if args['mode'] == 'completion':
-                filters.append(App.mode == 'completion')
-            elif args['mode'] == 'chat':
-                filters.append(App.mode == 'chat')
-            else:
-                pass
+        app_models = db.paginate(
+            db.select(App).where(*filters).order_by(App.created_at.desc()),
+            page=args['page'],
+            per_page=args['limit'],
+            error_out=False
+        )
 
-            app_models = db.paginate(
-                db.select(App).where(*filters).order_by(App.created_at.desc()),
-                page=args['page'],
-                per_page=args['limit'],
-                error_out=False
-            )
-
-            return app_models
-        except Exception as e:
-            return str(e)
+        return app_models
 
     @setup_required
     @login_required
