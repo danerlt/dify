@@ -1,11 +1,11 @@
 
 from core.tools.entities.tool_bundle import ApiBasedToolBundle
-from core.tools.entities.tool_entities import ToolParamter, ToolParamterOption
+from core.tools.entities.tool_entities import ToolParamter, ToolParamterOption, ApiProviderSchemaType
 from core.tools.entities.common_entities import I18nObject
 from core.tools.errors import ToolProviderNotFoundError, ToolNotSupportedError, \
       ToolApiSchemaError
 
-from typing import List
+from typing import List, Tuple
 
 from yaml import FullLoader, load
 from json import loads as json_loads, dumps as json_dumps
@@ -136,6 +136,21 @@ class ApiBasedToolSchemaParser:
         return ApiBasedToolSchemaParser.parse_openapi_to_tool_bundle(openapi, warning=warning)
     
     @staticmethod
+    def parse_openapi_json_to_tool_bundle(json: str, warning: dict = None) -> List[ApiBasedToolBundle]:
+        """
+            parse openapi yaml to tool bundle
+
+            :param yaml: the yaml string
+            :return: the tool bundle
+        """
+        warning = warning if warning is not None else {}
+
+        openapi: dict = json_loads(json)
+        if openapi is None:
+            raise ToolApiSchemaError('Invalid openapi json.')
+        return ApiBasedToolSchemaParser.parse_openapi_to_tool_bundle(openapi, warning=warning)
+    
+    @staticmethod
     def parse_swagger_to_openapi(swagger: dict, warning: dict = None) -> dict:
         """
             parse swagger to openapi
@@ -219,6 +234,21 @@ class ApiBasedToolSchemaParser:
         return ApiBasedToolSchemaParser.parse_openapi_to_tool_bundle(openapi, warning=warning)
 
     @staticmethod
+    def parse_swagger_json_to_tool_bundle(json: str, warning: dict = None) -> List[ApiBasedToolBundle]:
+        """
+            parse swagger yaml to tool bundle
+
+            :param yaml: the yaml string
+            :return: the tool bundle
+        """
+        warning = warning if warning is not None else {}
+
+        swagger: dict = json_loads(json)
+
+        openapi = ApiBasedToolSchemaParser.parse_swagger_to_openapi(swagger, warning=warning)
+        return ApiBasedToolSchemaParser.parse_openapi_to_tool_bundle(openapi, warning=warning)
+
+    @staticmethod
     def parse_openai_plugin_json_to_tool_bundle(json: str, warning: dict = None) -> List[ApiBasedToolBundle]:
         """
             parse openapi plugin yaml to tool bundle
@@ -248,3 +278,51 @@ class ApiBasedToolSchemaParser:
             raise ToolProviderNotFoundError('cannot get openapi yaml from url.')
         
         return ApiBasedToolSchemaParser.parse_openapi_yaml_to_tool_bundle(response.text, warning=warning)
+    
+    @staticmethod
+    def auto_parse_to_tool_bundle(content: str, warning: dict = None) -> Tuple[List[ApiBasedToolBundle], str]:
+        """
+            auto parse to tool bundle
+
+            :param content: the content
+            :return: tools bundle, schema_type
+        """
+        warning = warning if warning is not None else {}
+
+        json_possible = False
+        content = content.strip()
+
+        if content.startswith('{') and content.endswith('}'):
+            json_possible = True
+
+        if json_possible:
+            try:
+                return ApiBasedToolSchemaParser.parse_openapi_json_to_tool_bundle(content, warning=warning), \
+                    ApiProviderSchemaType.OPENAPI.value
+            except:
+                pass
+
+            try:
+                return ApiBasedToolSchemaParser.parse_swagger_json_to_tool_bundle(content, warning=warning), \
+                    ApiProviderSchemaType.SWAGGER.value
+            except:
+                pass
+            try:
+                return ApiBasedToolSchemaParser.parse_openai_plugin_json_to_tool_bundle(content, warning=warning), \
+                    ApiProviderSchemaType.OPENAI_PLUGIN.value
+            except:
+                pass
+        else:
+            try:
+                return ApiBasedToolSchemaParser.parse_openapi_yaml_to_tool_bundle(content, warning=warning), \
+                    ApiProviderSchemaType.OPENAPI.value
+            except:
+                pass
+
+            try:
+                return ApiBasedToolSchemaParser.parse_swagger_yaml_to_tool_bundle(content, warning=warning), \
+                    ApiProviderSchemaType.SWAGGER.value
+            except:
+                pass
+
+        raise ToolApiSchemaError('Invalid api schema.')

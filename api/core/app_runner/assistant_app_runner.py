@@ -89,7 +89,6 @@ class AssistantApplicationRunner(AppRunner):
             # save tool entity
             tool_instances[tool.tool_name] = tool_entity
         
-        # Create MessageChain
         message_chain = self._init_message_chain(
             message=message,
             query=query
@@ -129,16 +128,11 @@ class AssistantApplicationRunner(AppRunner):
                 memory=memory,
             )
             invoke_result = assistant_cot_runner.run(
-                application_generate_entity=application_generate_entity,
-                queue_manager=queue_manager,
                 model_instance=model_instance,
-                agent_llm_callback=agent_llm_callback,
                 conversation=conversation,
                 tool_instances=tool_instances,
                 message=message,
-                message_chain=message_chain,
                 prompt_messages_tools=prompt_messages_tools,
-                agent_entity=agent_entity,
                 query=query,
             )
         elif agent_entity.strategy == AgentEntity.Strategy.FUNCTION_CALLING:
@@ -157,19 +151,10 @@ class AssistantApplicationRunner(AppRunner):
         """
             convert tool to prompt message tool
         """
-        tool_entity = ToolManager.get_tool(
+        tool_entity = ToolManager.get_tool_runtime(
             provider_type=tool.provider_type, provider_name=tool.provider_name, tool_name=tool.tool_name, 
             tanent_id=application_generate_entity.tenant_id
         )
-
-        if tool.provider_type == 'builtin':
-            """
-                if builtin tool, fork a new tool with tenant_id
-                ensure the builtin tool has ability to access model
-            """
-            tool_entity = tool_entity.fork_processing_tool(meta={
-                "tenant_id": application_generate_entity.tenant_id,
-            })
 
         message_tool = PromptMessageTool(
             name=tool.tool_name,
