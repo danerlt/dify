@@ -93,7 +93,7 @@ class ApiToolProvider(db.Model):
     # name of the api provider
     name = db.Column(db.String(40), nullable=False)
     # icon
-    icon = db.Column(db.String(256), nullable=False)
+    icon = db.Column(db.String(255), nullable=False)
     # original schema
     schema = db.Column(db.Text, nullable=False)
     schema_type_str = db.Column(db.String(40), nullable=False)
@@ -107,6 +107,8 @@ class ApiToolProvider(db.Model):
     tools_str = db.Column(db.Text, nullable=False)
     # json format credentials
     credentials_str = db.Column(db.Text, nullable=False)
+    # privacy policy
+    privacy_policy = db.Column(db.String(255), nullable=True)
 
     created_at = db.Column(db.DateTime, nullable=False, server_default=db.text('CURRENT_TIMESTAMP(0)'))
     updated_at = db.Column(db.DateTime, nullable=False, server_default=db.text('CURRENT_TIMESTAMP(0)'))
