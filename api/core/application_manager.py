@@ -13,11 +13,8 @@ from core.entities.application_entities import (AdvancedChatPromptTemplateEntity
                                                 ApplicationGenerateEntity, AppOrchestrationConfigEntity, DatasetEntity,
                                                 DatasetRetrieveConfigEntity, ExternalDataVariableEntity,
                                                 FileUploadEntity, InvokeFrom, ModelConfigEntity, PromptTemplateEntity,
-                                                SensitiveWordAvoidanceEntity)
-from core.entities.application_entities import ApplicationGenerateEntity, AppOrchestrationConfigEntity, \
-    ModelConfigEntity, PromptTemplateEntity, AdvancedChatPromptTemplateEntity, \
-    AdvancedCompletionPromptTemplateEntity, ExternalDataVariableEntity, DatasetEntity, DatasetRetrieveConfigEntity, \
-    AgentEntity, AgentToolEntity, FileUploadEntity, SensitiveWordAvoidanceEntity, InvokeFrom, AgentPromptEntity
+                                                SensitiveWordAvoidanceEntity, AgentPromptEntity)
+from core.tools.prompt.template import REACT_PROMPT_TEMPLATES
 from core.entities.model_entities import ModelStatus
 from core.errors.error import ModelCurrentlyNotSupportError, ProviderTokenNotInitError, QuotaExceededError
 from core.file.file_obj import FileObj
@@ -394,6 +391,8 @@ class ApplicationManager:
 
                 dataset_id = dataset.get('id', None)
                 dataset_ids.append(dataset_id)
+        else:
+            datasets = {'strategy': 'router', 'datasets': []}
 
         if 'agent_mode' in copy_app_model_config_dict and copy_app_model_config_dict['agent_mode'] \
                 and 'enabled' in copy_app_model_config_dict['agent_mode'] and copy_app_model_config_dict['agent_mode'][
@@ -443,10 +442,18 @@ class ApplicationManager:
                     dataset_ids.append(dataset_id)
 
             agent_prompt = agent_dict.get('prompt', {})
-            agent_prompt_entity = AgentPromptEntity(
-                first_prompt=agent_prompt.get('first_prompt', ''),
-                next_iteration=agent_prompt.get('next_iteration', ''),
-            )
+            # check model mode
+            model_mode = copy_app_model_config_dict.get('model', {}).get('mode', 'completion')
+            if model_mode == 'completion':
+                agent_prompt_entity = AgentPromptEntity(
+                    first_prompt=agent_prompt.get('first_prompt', REACT_PROMPT_TEMPLATES['english']['completion']['prompt']),
+                    next_iteration=agent_prompt.get('next_iteration', REACT_PROMPT_TEMPLATES['english']['completion']['agent_scratchpad']),
+                )
+            else:
+                agent_prompt_entity = AgentPromptEntity(
+                    first_prompt=agent_prompt.get('first_prompt', REACT_PROMPT_TEMPLATES['english']['chat']['prompt']),
+                    next_iteration=agent_prompt.get('next_iteration', REACT_PROMPT_TEMPLATES['english']['chat']['agent_scratchpad']),
+                )
 
             properties['agent'] = AgentEntity(
                 provider=properties['model_config'].provider,

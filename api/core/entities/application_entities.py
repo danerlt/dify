@@ -1,12 +1,12 @@
 from enum import Enum
-from typing import Optional, Any, cast, Literal, Union
-
+from typing import Optional, Any, Literal, Union
 from pydantic import BaseModel
 
 from core.entities.provider_configuration import ProviderModelBundle
 from core.file.file_obj import FileObj
 from core.model_runtime.entities.message_entities import PromptMessageRole
 from core.model_runtime.entities.model_entities import AIModelEntity
+from pydantic import BaseModel
 
 
 class ModelConfigEntity(BaseModel):
