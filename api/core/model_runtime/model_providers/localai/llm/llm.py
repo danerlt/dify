@@ -1,22 +1,24 @@
-from typing import Generator, List, Optional, Union, cast
-from core.model_runtime.entities.llm_entities import LLMResult, LLMUsage, LLMResultChunk, LLMResultChunkDelta, LLMMode
-from core.model_runtime.entities.message_entities import PromptMessage, PromptMessageTool, AssistantPromptMessage, UserPromptMessage, SystemPromptMessage
-from core.model_runtime.entities.model_entities import AIModelEntity, ParameterRule, ParameterType, FetchFrom, ModelType
-from core.model_runtime.entities.common_entities import I18nObject
-from core.model_runtime.model_providers.__base.large_language_model import LargeLanguageModel
-from core.model_runtime.errors.invoke import InvokeConnectionError, InvokeServerUnavailableError, InvokeRateLimitError, \
-    InvokeAuthorizationError, InvokeBadRequestError, InvokeError
-from core.model_runtime.errors.validate import CredentialsValidateFailedError
-from openai import OpenAI, Stream, \
-    APIConnectionError, APITimeoutError, AuthenticationError, InternalServerError, \
-    RateLimitError, ConflictError, NotFoundError, UnprocessableEntityError, PermissionDeniedError
-from openai.types.chat import ChatCompletionChunk, ChatCompletion
-from openai.types.completion import Completion
-from openai.types.chat.chat_completion_message import FunctionCall
-from httpx import Timeout
 from os.path import join
+from typing import Generator, List, Optional, Union, cast
 
+from core.model_runtime.entities.common_entities import I18nObject
+from core.model_runtime.entities.llm_entities import LLMMode, LLMResult, LLMResultChunk, LLMResultChunkDelta, LLMUsage
+from core.model_runtime.entities.message_entities import (AssistantPromptMessage, PromptMessage, PromptMessageTool,
+                                                          SystemPromptMessage, UserPromptMessage)
+from core.model_runtime.entities.model_entities import (AIModelEntity, FetchFrom, ModelPropertyKey, ModelType,
+                                                        ParameterRule, ParameterType)
+from core.model_runtime.errors.invoke import (InvokeAuthorizationError, InvokeBadRequestError, InvokeConnectionError,
+                                              InvokeError, InvokeRateLimitError, InvokeServerUnavailableError)
+from core.model_runtime.errors.validate import CredentialsValidateFailedError
+from core.model_runtime.model_providers.__base.large_language_model import LargeLanguageModel
 from core.model_runtime.utils import helper
+from httpx import Timeout
+from openai import (APIConnectionError, APITimeoutError, AuthenticationError, ConflictError, InternalServerError,
+                    NotFoundError, OpenAI, PermissionDeniedError, RateLimitError, Stream, UnprocessableEntityError)
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
+from openai.types.chat.chat_completion_message import FunctionCall
+from openai.types.completion import Completion
+
 
 class LocalAILarguageModel(LargeLanguageModel):
     def _invoke(self, model: str, credentials: dict, 
@@ -156,9 +158,9 @@ class LocalAILarguageModel(LargeLanguageModel):
     def get_customizable_model_schema(self, model: str, credentials: dict) -> AIModelEntity | None:
         completion_model = None
         if credentials['completion_type'] == 'chat_completion':
-            completion_model = LLMMode.CHAT
+            completion_model = LLMMode.CHAT.value
         elif credentials['completion_type'] == 'completion':
-            completion_model = LLMMode.COMPLETION
+            completion_model = LLMMode.COMPLETION.value
         else:
             raise ValueError(f"Unknown completion type {credentials['completion_type']}")
             
@@ -202,7 +204,7 @@ class LocalAILarguageModel(LargeLanguageModel):
             ),
             fetch_from=FetchFrom.CUSTOMIZABLE_MODEL,
             model_type=ModelType.LLM,
-            model_properties={ 'mode': completion_model } if completion_model else {},
+            model_properties={ ModelPropertyKey.MODE: completion_model } if completion_model else {},
             parameter_rules=rules
         )
 

@@ -3,12 +3,11 @@ import time
 
 import click
 from celery import shared_task
-from werkzeug.exceptions import NotFound
-
 from core.index.index import IndexBuilder
 from extensions.ext_database import db
 from extensions.ext_redis import redis_client
 from models.dataset import DocumentSegment
+from werkzeug.exceptions import NotFound
 
 
 @shared_task(queue='dataset')
@@ -27,7 +26,7 @@ def disable_segment_from_index_task(segment_id: str):
         raise NotFound('Segment not found')
 
     if segment.status != 'completed':
-        return
+        raise NotFound('Segment is not completed , disable action is not allowed.')
 
     indexing_cache_key = 'segment_{}_indexing'.format(segment.id)
 

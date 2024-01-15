@@ -1,12 +1,8 @@
 import tempfile
 from pathlib import Path
-from typing import List, Union, Optional
+from typing import List, Optional, Union
 
 import requests
-from flask import current_app
-from langchain.document_loaders import TextLoader, Docx2txtLoader
-from langchain.schema import Document
-
 from core.data_loader.loader.csv_loader import CSVLoader
 from core.data_loader.loader.excel import ExcelLoader
 from core.data_loader.loader.html import HTMLLoader
@@ -20,6 +16,9 @@ from core.data_loader.loader.unstructured.unstructured_pptx import UnstructuredP
 from core.data_loader.loader.unstructured.unstructured_text import UnstructuredTextLoader
 from core.data_loader.loader.unstructured.unstructured_xml import UnstructuredXmlLoader
 from extensions.ext_storage import storage
+from flask import current_app
+from langchain.document_loaders import Docx2txtLoader, TextLoader
+from langchain.schema import Document
 from models.model import UploadFile
 
 SUPPORT_URL_CONTENT_TYPES = ['application/pdf', 'text/plain']
@@ -65,7 +64,8 @@ class FileExtractor:
             elif file_extension == '.pdf':
                 loader = PdfLoader(file_path, upload_file=upload_file)
             elif file_extension in ['.md', '.markdown']:
-                loader = UnstructuredMarkdownLoader(file_path, unstructured_api_url)
+                loader = UnstructuredMarkdownLoader(file_path, unstructured_api_url) if is_automatic \
+                    else MarkdownLoader(file_path, autodetect_encoding=True)
             elif file_extension in ['.htm', '.html']:
                 loader = HTMLLoader(file_path)
             elif file_extension == '.docx':
@@ -84,7 +84,8 @@ class FileExtractor:
                 loader = UnstructuredXmlLoader(file_path, unstructured_api_url)
             else:
                 # txt
-                loader = UnstructuredTextLoader(file_path, unstructured_api_url)
+                loader = UnstructuredTextLoader(file_path, unstructured_api_url) if is_automatic \
+                    else TextLoader(file_path, autodetect_encoding=True)
         else:
             if file_extension == '.xlsx':
                 loader = ExcelLoader(file_path)

@@ -4,14 +4,13 @@ from typing import Optional, Tuple
 
 import numpy as np
 import tiktoken
-from openai import AzureOpenAI
-
-from core.model_runtime.entities.model_entities import PriceType, AIModelEntity
-from core.model_runtime.entities.text_embedding_entities import TextEmbeddingResult, EmbeddingUsage
+from core.model_runtime.entities.model_entities import AIModelEntity, PriceType
+from core.model_runtime.entities.text_embedding_entities import EmbeddingUsage, TextEmbeddingResult
 from core.model_runtime.errors.validate import CredentialsValidateFailedError
 from core.model_runtime.model_providers.__base.text_embedding_model import TextEmbeddingModel
 from core.model_runtime.model_providers.azure_openai._common import _CommonAzureOpenAI
 from core.model_runtime.model_providers.azure_openai._constant import EMBEDDING_BASE_MODELS, AzureBaseModel
+from openai import AzureOpenAI
 
 
 class AzureOpenAITextEmbeddingModel(_CommonAzureOpenAI, TextEmbeddingModel):
@@ -54,7 +53,7 @@ class AzureOpenAITextEmbeddingModel(_CommonAzureOpenAI, TextEmbeddingModel):
         _iter = range(0, len(tokens), max_chunks)
 
         for i in _iter:
-            embeddings, embedding_used_tokens = self._embedding_invoke(
+            embeddings_batch, embedding_used_tokens = self._embedding_invoke(
                 model=model,
                 client=client,
                 texts=tokens[i: i + max_chunks],
@@ -62,7 +61,7 @@ class AzureOpenAITextEmbeddingModel(_CommonAzureOpenAI, TextEmbeddingModel):
             )
 
             used_tokens += embedding_used_tokens
-            batched_embeddings += [data for data in embeddings]
+            batched_embeddings += embeddings_batch
 
         results: list[list[list[float]]] = [[] for _ in range(len(texts))]
         num_tokens_in_batch: list[list[int]] = [[] for _ in range(len(texts))]
@@ -73,7 +72,7 @@ class AzureOpenAITextEmbeddingModel(_CommonAzureOpenAI, TextEmbeddingModel):
         for i in range(len(texts)):
             _result = results[i]
             if len(_result) == 0:
-                embeddings, embedding_used_tokens = self._embedding_invoke(
+                embeddings_batch, embedding_used_tokens = self._embedding_invoke(
                     model=model,
                     client=client,
                     texts=[""],
@@ -81,7 +80,7 @@ class AzureOpenAITextEmbeddingModel(_CommonAzureOpenAI, TextEmbeddingModel):
                 )
 
                 used_tokens += embedding_used_tokens
-                average = embeddings[0]
+                average = embeddings_batch[0]
             else:
                 average = np.average(_result, axis=0, weights=num_tokens_in_batch[i])
             embeddings[i] = (average / np.linalg.norm(average)).tolist()

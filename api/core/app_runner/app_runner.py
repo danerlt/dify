@@ -1,12 +1,12 @@
 import time
-from typing import cast, Optional, List, Tuple, Generator, Union
+from typing import Generator, List, Optional, Tuple, Union, cast
 
-from core.application_queue_manager import ApplicationQueueManager
-from core.entities.application_entities import ModelConfigEntity, PromptTemplateEntity, AppOrchestrationConfigEntity
+from core.application_queue_manager import ApplicationQueueManager, PublishFrom
+from core.entities.application_entities import AppOrchestrationConfigEntity, ModelConfigEntity, PromptTemplateEntity
 from core.file.file_obj import FileObj
 from core.memory.token_buffer_memory import TokenBufferMemory
 from core.model_runtime.entities.llm_entities import LLMResult, LLMResultChunk, LLMResultChunkDelta, LLMUsage
-from core.model_runtime.entities.message_entities import PromptMessage, AssistantPromptMessage
+from core.model_runtime.entities.message_entities import AssistantPromptMessage, PromptMessage
 from core.model_runtime.entities.model_entities import ModelPropertyKey
 from core.model_runtime.errors.invoke import InvokeBadRequestError
 from core.model_runtime.model_providers.__base.large_language_model import LargeLanguageModel
@@ -50,7 +50,7 @@ class AppRunner:
             max_tokens = 0
 
         # get prompt messages without memory and context
-        prompt_messages, stop = self.originze_prompt_messages(
+        prompt_messages, stop = self.organize_prompt_messages(
             app_record=app_record,
             model_config=model_config,
             prompt_template_entity=prompt_template_entity,
@@ -107,7 +107,7 @@ class AppRunner:
                         or (parameter_rule.use_template and parameter_rule.use_template == 'max_tokens')):
                     model_config.parameters[parameter_rule.name] = max_tokens
 
-    def originze_prompt_messages(self, app_record: App,
+    def organize_prompt_messages(self, app_record: App,
                                  model_config: ModelConfigEntity,
                                  prompt_template_entity: PromptTemplateEntity,
                                  inputs: dict[str, str],
@@ -183,7 +183,7 @@ class AppRunner:
                         index=index,
                         message=AssistantPromptMessage(content=token)
                     )
-                ))
+                ), PublishFrom.APPLICATION_MANAGER)
                 index += 1
                 time.sleep(0.01)
 
@@ -193,7 +193,8 @@ class AppRunner:
                 prompt_messages=prompt_messages,
                 message=AssistantPromptMessage(content=text),
                 usage=usage if usage else LLMUsage.empty_usage()
-            )
+            ),
+            pub_from=PublishFrom.APPLICATION_MANAGER
         )
 
     def _handle_invoke_result(self, invoke_result: Union[LLMResult, Generator],
@@ -226,7 +227,8 @@ class AppRunner:
         :return:
         """
         queue_manager.publish_message_end(
-            llm_result=invoke_result
+            llm_result=invoke_result,
+            pub_from=PublishFrom.APPLICATION_MANAGER
         )
 
     def _handle_invoke_result_stream(self, invoke_result: Generator,
@@ -242,7 +244,7 @@ class AppRunner:
         text = ''
         usage = None
         for result in invoke_result:
-            queue_manager.publish_chunk_message(result)
+            queue_manager.publish_chunk_message(result, PublishFrom.APPLICATION_MANAGER)
 
             text += result.delta.message.content
 
@@ -255,6 +257,9 @@ class AppRunner:
             if not usage and result.delta.usage:
                 usage = result.delta.usage
 
+        if not usage:
+            usage = LLMUsage.empty_usage()
+
         llm_result = LLMResult(
             model=model,
             prompt_messages=prompt_messages,
@@ -263,5 +268,6 @@ class AppRunner:
         )
 
         queue_manager.publish_message_end(
-            llm_result=llm_result
+            llm_result=llm_result,
+            pub_from=PublishFrom.APPLICATION_MANAGER
         )

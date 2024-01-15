@@ -2,15 +2,14 @@ import logging
 import os
 import time
 from abc import abstractmethod
-from typing import Optional, Generator, Union, List
+from typing import Generator, List, Optional, Union
 
 from core.model_runtime.callbacks.base_callback import Callback
 from core.model_runtime.callbacks.logging_callback import LoggingCallback
-from core.model_runtime.entities.message_entities import PromptMessage, PromptMessageTool, AssistantPromptMessage
-from core.model_runtime.entities.model_entities import ModelPropertyKey, PriceType, ParameterType, ParameterRule, \
-    ModelType
-from core.model_runtime.entities.llm_entities import LLMResult, LLMMode, LLMUsage, \
-    LLMResultChunk, LLMResultChunkDelta
+from core.model_runtime.entities.llm_entities import LLMMode, LLMResult, LLMResultChunk, LLMResultChunkDelta, LLMUsage
+from core.model_runtime.entities.message_entities import AssistantPromptMessage, PromptMessage, PromptMessageTool
+from core.model_runtime.entities.model_entities import (ModelPropertyKey, ModelType, ParameterRule, ParameterType,
+                                                        PriceType)
 from core.model_runtime.model_providers.__base.ai_model import AIModel
 
 logger = logging.getLogger(__name__)
@@ -132,8 +131,8 @@ class LargeLanguageModel(AIModel):
         system_fingerprint = None
         real_model = model
 
-        for chunk in result:
-            try:
+        try:
+            for chunk in result:
                 yield chunk
 
                 self._trigger_new_chunk_callbacks(
@@ -156,8 +155,8 @@ class LargeLanguageModel(AIModel):
 
                 if chunk.system_fingerprint:
                     system_fingerprint = chunk.system_fingerprint
-            except Exception as e:
-                raise self._transform_invoke_error(e)
+        except Exception as e:
+            raise self._transform_invoke_error(e)
 
         self._trigger_after_invoke_callbacks(
             model=model,
@@ -165,7 +164,7 @@ class LargeLanguageModel(AIModel):
                 model=real_model,
                 prompt_messages=prompt_messages,
                 message=prompt_message,
-                usage=usage,
+                usage=usage if usage else LLMUsage.empty_usage(),
                 system_fingerprint=system_fingerprint
             ),
             credentials=credentials,

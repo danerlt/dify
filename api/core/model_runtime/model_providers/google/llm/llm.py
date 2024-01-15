@@ -1,23 +1,21 @@
-from typing import Optional, Generator, Union, List
+import logging
+from typing import Generator, List, Optional, Union
 
-import google.generativeai as genai
 import google.api_core.exceptions as exceptions
+import google.generativeai as genai
 import google.generativeai.client as client
-
-from google.generativeai.types import GenerateContentResponse, ContentType
-from google.generativeai.types.content_types import to_part
-
-from core.model_runtime.entities.message_entities import PromptMessage, PromptMessageTool, UserPromptMessage, AssistantPromptMessage, \
-    SystemPromptMessage, PromptMessageRole, PromptMessageContentType
-from core.model_runtime.entities.llm_entities import LLMResult, LLMResultChunk, \
-    LLMResultChunkDelta
-from core.model_runtime.errors.invoke import InvokeConnectionError, InvokeServerUnavailableError, InvokeRateLimitError, \
-    InvokeAuthorizationError, InvokeBadRequestError, InvokeError
+from core.model_runtime.entities.llm_entities import LLMResult, LLMResultChunk, LLMResultChunkDelta
+from core.model_runtime.entities.message_entities import (AssistantPromptMessage, PromptMessage,
+                                                          PromptMessageContentType, PromptMessageRole,
+                                                          PromptMessageTool, SystemPromptMessage, UserPromptMessage)
+from core.model_runtime.errors.invoke import (InvokeAuthorizationError, InvokeBadRequestError, InvokeConnectionError,
+                                              InvokeError, InvokeRateLimitError, InvokeServerUnavailableError)
 from core.model_runtime.errors.validate import CredentialsValidateFailedError
 from core.model_runtime.model_providers import google
 from core.model_runtime.model_providers.__base.large_language_model import LargeLanguageModel
+from google.generativeai.types import ContentType, GenerateContentResponse, HarmBlockThreshold, HarmCategory
+from google.generativeai.types.content_types import to_part
 
-import logging
 logger = logging.getLogger(__name__)
 
 class GoogleLargeLanguageModel(LargeLanguageModel):
@@ -124,7 +122,7 @@ class GoogleLargeLanguageModel(LargeLanguageModel):
             last_msg = prompt_messages[-1]
             content = self._format_message_to_glm_content(last_msg)
             history.append(content)
-        else:    
+        else:
             for msg in prompt_messages:     # makes message roles strictly alternating
                 content = self._format_message_to_glm_content(msg)
                 if history and history[-1]["role"] == content["role"]:
@@ -139,13 +137,21 @@ class GoogleLargeLanguageModel(LargeLanguageModel):
         new_custom_client = new_client_manager.make_client("generative")
 
         google_model._client = new_custom_client
+
+        safety_settings={
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
         
         response = google_model.generate_content(
             contents=history,
             generation_config=genai.types.GenerationConfig(
                 **config_kwargs
             ),
-            stream=stream
+            stream=stream,
+            safety_settings=safety_settings
         )
 
         if stream:
@@ -168,7 +174,6 @@ class GoogleLargeLanguageModel(LargeLanguageModel):
         assistant_prompt_message = AssistantPromptMessage(
             content=response.text
         )
-
 
         # calculate num tokens
         prompt_tokens = self.get_num_tokens(model, credentials, prompt_messages)
@@ -202,11 +207,11 @@ class GoogleLargeLanguageModel(LargeLanguageModel):
         for chunk in response:
             content = chunk.text
             index += 1
-
+           
             assistant_prompt_message = AssistantPromptMessage(
                 content=content if content else '',
             )
-
+  
             if not response._done:
                 
                 # transform assistant message to prompt message

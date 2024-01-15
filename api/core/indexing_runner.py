@@ -5,34 +5,34 @@ import re
 import threading
 import time
 import uuid
-from typing import Optional, List, cast, Type, Union, Literal, AbstractSet, Collection, Any
-
-from flask import current_app, Flask
-from flask_login import current_user
-from langchain.schema import Document
-from langchain.text_splitter import TextSplitter, TS, TokenTextSplitter
-from sqlalchemy.orm.exc import ObjectDeletedError
+from typing import AbstractSet, Any, Collection, List, Literal, Optional, Type, Union, cast
 
 from core.data_loader.file_extractor import FileExtractor
 from core.data_loader.loader.notion import NotionLoader
 from core.docstore.dataset_docstore import DatasetDocumentStore
+from core.errors.error import ProviderTokenNotInitError
 from core.generator.llm_generator import LLMGenerator
 from core.index.index import IndexBuilder
-from core.model_manager import ModelManager
-from core.errors.error import ProviderTokenNotInitError
+from core.model_manager import ModelManager, ModelInstance
 from core.model_runtime.entities.model_entities import ModelType, PriceType
 from core.model_runtime.model_providers.__base.large_language_model import LargeLanguageModel
 from core.model_runtime.model_providers.__base.text_embedding_model import TextEmbeddingModel
 from core.model_runtime.model_providers.__base.tokenizers.gpt2_tokenzier import GPT2Tokenizer
-from core.spiltter.fixed_text_splitter import FixedRecursiveCharacterTextSplitter, EnhanceRecursiveCharacterTextSplitter
+from core.spiltter.fixed_text_splitter import EnhanceRecursiveCharacterTextSplitter, FixedRecursiveCharacterTextSplitter
 from extensions.ext_database import db
 from extensions.ext_redis import redis_client
 from extensions.ext_storage import storage
+from flask import Flask, current_app
+from flask_login import current_user
+from langchain.schema import Document
+from langchain.text_splitter import TS, TextSplitter, TokenTextSplitter
 from libs import helper
+from models.dataset import Dataset, DatasetProcessRule
 from models.dataset import Document as DatasetDocument
-from models.dataset import Dataset, DocumentSegment, DatasetProcessRule
+from models.dataset import DocumentSegment
 from models.model import UploadFile
 from models.source import DataSourceBinding
+from sqlalchemy.orm.exc import ObjectDeletedError
 
 
 class IndexingRunner:
@@ -59,10 +59,26 @@ class IndexingRunner:
                     first()
 
                 # load file
-                text_docs = self._load_data(dataset_document)
+                text_docs = self._load_data(dataset_document, processing_rule.mode == 'automatic')
+
+                # get embedding model instance
+                embedding_model_instance = None
+                if dataset.indexing_technique == 'high_quality':
+                    if dataset.embedding_model_provider:
+                        embedding_model_instance = self.model_manager.get_model_instance(
+                            tenant_id=dataset.tenant_id,
+                            provider=dataset.embedding_model_provider,
+                            model_type=ModelType.TEXT_EMBEDDING,
+                            model=dataset.embedding_model
+                        )
+                    else:
+                        embedding_model_instance = self.model_manager.get_default_model_instance(
+                            tenant_id=dataset.tenant_id,
+                            model_type=ModelType.TEXT_EMBEDDING,
+                        )
 
                 # get splitter
-                splitter = self._get_splitter(processing_rule)
+                splitter = self._get_splitter(processing_rule, embedding_model_instance)
 
                 # split to documents
                 documents = self._step_split(
@@ -113,17 +129,32 @@ class IndexingRunner:
             for document_segment in document_segments:
                 db.session.delete(document_segment)
             db.session.commit()
-
-            # load file
-            text_docs = self._load_data(dataset_document)
-
             # get the process rule
             processing_rule = db.session.query(DatasetProcessRule). \
                 filter(DatasetProcessRule.id == dataset_document.dataset_process_rule_id). \
                 first()
 
+            # load file
+            text_docs = self._load_data(dataset_document, processing_rule.mode == 'automatic')
+
+            # get embedding model instance
+            embedding_model_instance = None
+            if dataset.indexing_technique == 'high_quality':
+                if dataset.embedding_model_provider:
+                    embedding_model_instance = self.model_manager.get_model_instance(
+                        tenant_id=dataset.tenant_id,
+                        provider=dataset.embedding_model_provider,
+                        model_type=ModelType.TEXT_EMBEDDING,
+                        model=dataset.embedding_model
+                    )
+                else:
+                    embedding_model_instance = self.model_manager.get_default_model_instance(
+                        tenant_id=dataset.tenant_id,
+                        model_type=ModelType.TEXT_EMBEDDING,
+                    )
+
             # get splitter
-            splitter = self._get_splitter(processing_rule)
+            splitter = self._get_splitter(processing_rule, embedding_model_instance)
 
             # split to documents
             documents = self._step_split(
@@ -222,12 +253,18 @@ class IndexingRunner:
             if not dataset:
                 raise ValueError('Dataset not found.')
             if dataset.indexing_technique == 'high_quality' or indexing_technique == 'high_quality':
-                embedding_model_instance = self.model_manager.get_model_instance(
-                    tenant_id=tenant_id,
-                    provider=dataset.embedding_model_provider,
-                    model_type=ModelType.TEXT_EMBEDDING,
-                    model=dataset.embedding_model
-                )
+                if dataset.embedding_model_provider:
+                    embedding_model_instance = self.model_manager.get_model_instance(
+                        tenant_id=tenant_id,
+                        provider=dataset.embedding_model_provider,
+                        model_type=ModelType.TEXT_EMBEDDING,
+                        model=dataset.embedding_model
+                    )
+                else:
+                    embedding_model_instance = self.model_manager.get_default_model_instance(
+                        tenant_id=tenant_id,
+                        model_type=ModelType.TEXT_EMBEDDING,
+                    )
         else:
             if indexing_technique == 'high_quality':
                 embedding_model_instance = self.model_manager.get_default_model_instance(
@@ -238,16 +275,17 @@ class IndexingRunner:
         preview_texts = []
         total_segments = 0
         for file_detail in file_details:
-            # load data from file
-            text_docs = FileExtractor.load(file_detail)
 
             processing_rule = DatasetProcessRule(
                 mode=tmp_processing_rule["mode"],
                 rules=json.dumps(tmp_processing_rule["rules"])
             )
 
+            # load data from file
+            text_docs = FileExtractor.load(file_detail, is_automatic=processing_rule.mode == 'automatic')
+
             # get splitter
-            splitter = self._get_splitter(processing_rule)
+            splitter = self._get_splitter(processing_rule, embedding_model_instance)
 
             # split to documents
             documents = self._split_to_documents_for_estimate(
@@ -328,12 +366,18 @@ class IndexingRunner:
             if not dataset:
                 raise ValueError('Dataset not found.')
             if dataset.indexing_technique == 'high_quality' or indexing_technique == 'high_quality':
-                embedding_model_instance = self.model_manager.get_model_instance(
-                    tenant_id=tenant_id,
-                    provider=dataset.embedding_model_provider,
-                    model_type=ModelType.TEXT_EMBEDDING,
-                    model=dataset.embedding_model
-                )
+                if dataset.embedding_model_provider:
+                    embedding_model_instance = self.model_manager.get_model_instance(
+                        tenant_id=tenant_id,
+                        provider=dataset.embedding_model_provider,
+                        model_type=ModelType.TEXT_EMBEDDING,
+                        model=dataset.embedding_model
+                    )
+                else:
+                    embedding_model_instance = self.model_manager.get_default_model_instance(
+                        tenant_id=tenant_id,
+                        model_type=ModelType.TEXT_EMBEDDING,
+                    )
         else:
             if indexing_technique == 'high_quality':
                 embedding_model_instance = self.model_manager.get_default_model_instance(
@@ -372,7 +416,7 @@ class IndexingRunner:
                 )
 
                 # get splitter
-                splitter = self._get_splitter(processing_rule)
+                splitter = self._get_splitter(processing_rule, embedding_model_instance)
 
                 # split to documents
                 documents = self._split_to_documents_for_estimate(
@@ -382,13 +426,15 @@ class IndexingRunner:
                 )
                 total_segments += len(documents)
 
-                embedding_model_type_instance = embedding_model_instance.model_type_instance
-                embedding_model_type_instance = cast(TextEmbeddingModel, embedding_model_type_instance)
+                embedding_model_type_instance = None
+                if embedding_model_instance:
+                    embedding_model_type_instance = embedding_model_instance.model_type_instance
+                    embedding_model_type_instance = cast(TextEmbeddingModel, embedding_model_type_instance)
 
                 for document in documents:
                     if len(preview_texts) < 5:
                         preview_texts.append(document.page_content)
-                    if indexing_technique == 'high_quality' or embedding_model_instance:
+                    if indexing_technique == 'high_quality' and embedding_model_type_instance:
                         tokens += embedding_model_type_instance.get_num_tokens(
                             model=embedding_model_instance.model,
                             credentials=embedding_model_instance.credentials,
@@ -457,7 +503,7 @@ class IndexingRunner:
                 one_or_none()
 
             if file_detail:
-                text_docs = FileExtractor.load(file_detail, is_automatic=True)
+                text_docs = FileExtractor.load(file_detail, is_automatic=automatic)
         elif dataset_document.data_source_type == 'notion_import':
             loader = NotionLoader.from_document(dataset_document)
             text_docs = loader.load()
@@ -488,7 +534,8 @@ class IndexingRunner:
         text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x80-\xFF]', '', text)
         return text
 
-    def _get_splitter(self, processing_rule: DatasetProcessRule) -> TextSplitter:
+    def _get_splitter(self, processing_rule: DatasetProcessRule,
+                      embedding_model_instance: Optional[ModelInstance]) -> TextSplitter:
         """
         Get the NodeParser object according to the processing rule.
         """
@@ -503,19 +550,20 @@ class IndexingRunner:
             if separator:
                 separator = separator.replace('\\n', '\n')
 
-
-            character_splitter = FixedRecursiveCharacterTextSplitter.from_gpt2_encoder(
+            character_splitter = FixedRecursiveCharacterTextSplitter.from_encoder(
                 chunk_size=segmentation["max_tokens"],
                 chunk_overlap=0,
                 fixed_separator=separator,
-                separators=["\n\n", "。", ".", " ", ""]
+                separators=["\n\n", "。", ".", " ", ""],
+                embedding_model_instance=embedding_model_instance
             )
         else:
             # Automatic segmentation
-            character_splitter = EnhanceRecursiveCharacterTextSplitter.from_gpt2_encoder(
+            character_splitter = EnhanceRecursiveCharacterTextSplitter.from_encoder(
                 chunk_size=DatasetProcessRule.AUTOMATIC_RULES['segmentation']['max_tokens'],
                 chunk_overlap=0,
-                separators=["\n\n", "。", ".", " ", ""]
+                separators=["\n\n", "。", ".", " ", ""],
+                embedding_model_instance=embedding_model_instance
             )
 
         return character_splitter
@@ -700,7 +748,7 @@ class IndexingRunner:
         return text
 
     def format_split_text(self, text):
-        regex = r"Q\d+:\s*(.*?)\s*A\d+:\s*([\s\S]*?)(?=Q\d+:|$)" 
+        regex = r"Q\d+:\s*(.*?)\s*A\d+:\s*([\s\S]*?)(?=Q\d+:|$)"
         matches = re.findall(regex, text, re.UNICODE)
 
         return [

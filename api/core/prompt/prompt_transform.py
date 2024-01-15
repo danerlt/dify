@@ -1,15 +1,16 @@
+import enum
 import json
 import os
 import re
-import enum
 from typing import List, Optional, Tuple, cast
 
-from core.entities.application_entities import ModelConfigEntity, PromptTemplateEntity, \
-    AdvancedCompletionPromptTemplateEntity
+from core.entities.application_entities import (AdvancedCompletionPromptTemplateEntity, ModelConfigEntity,
+                                                PromptTemplateEntity)
 from core.file.file_obj import FileObj
 from core.memory.token_buffer_memory import TokenBufferMemory
-from core.model_runtime.entities.message_entities import PromptMessage, SystemPromptMessage, UserPromptMessage, \
-    TextPromptMessageContent, PromptMessageRole, AssistantPromptMessage
+from core.model_runtime.entities.message_entities import (AssistantPromptMessage, PromptMessage, PromptMessageRole,
+                                                          SystemPromptMessage, TextPromptMessageContent,
+                                                          UserPromptMessage)
 from core.model_runtime.entities.model_entities import ModelPropertyKey
 from core.model_runtime.model_providers.__base.large_language_model import LargeLanguageModel
 from core.prompt.prompt_builder import PromptBuilder
@@ -121,6 +122,7 @@ class PromptTransform:
                     prompt_template_entity=prompt_template_entity,
                     inputs=inputs,
                     query=query,
+                    files=files,
                     context=context,
                     memory=memory,
                     model_config=model_config
@@ -207,7 +209,7 @@ class PromptTransform:
 
         json_file_path = os.path.join(prompt_path, f'{prompt_name}.json')
         # Open the JSON file and read its content
-        with open(json_file_path, 'r') as json_file:
+        with open(json_file_path, 'r', encoding='utf-8') as json_file:
             return json.load(json_file)
 
     def _get_simple_chat_app_chat_model_prompt_messages(self, prompt_rules: dict,
@@ -334,7 +336,25 @@ class PromptTransform:
 
         prompt = re.sub(r'<\|.*?\|>', '', prompt)
 
-        return [UserPromptMessage(content=prompt)]
+        model_mode = ModelMode.value_of(model_config.mode)
+
+        if model_mode == ModelMode.CHAT and files:
+            prompt_message_contents = [TextPromptMessageContent(data=prompt)]
+            for file in files:
+                prompt_message_contents.append(file.prompt_message_content)
+
+            prompt_message = UserPromptMessage(content=prompt_message_contents)
+        else:
+            if files:
+                prompt_message_contents = [TextPromptMessageContent(data=prompt)]
+                for file in files:
+                    prompt_message_contents.append(file.prompt_message_content)
+
+                prompt_message = UserPromptMessage(content=prompt_message_contents)
+            else:
+                prompt_message = UserPromptMessage(content=prompt)
+
+        return [prompt_message]
 
     def _set_context_variable(self, context: str, prompt_template: PromptTemplateParser, prompt_inputs: dict) -> None:
         if '#context#' in prompt_template.variable_keys:
@@ -423,6 +443,7 @@ class PromptTransform:
                                                        prompt_template_entity: PromptTemplateEntity,
                                                        inputs: dict,
                                                        query: str,
+                                                       files: List[FileObj],
                                                        context: Optional[str],
                                                        memory: Optional[TokenBufferMemory],
                                                        model_config: ModelConfigEntity) -> List[PromptMessage]:
@@ -450,7 +471,14 @@ class PromptTransform:
 
         prompt = self._format_prompt(prompt_template, prompt_inputs)
 
-        prompt_messages.append(UserPromptMessage(content=prompt))
+        if files:
+            prompt_message_contents = [TextPromptMessageContent(data=prompt)]
+            for file in files:
+                prompt_message_contents.append(file.prompt_message_content)
+
+            prompt_messages.append(UserPromptMessage(content=prompt_message_contents))
+        else:
+            prompt_messages.append(UserPromptMessage(content=prompt))
 
         return prompt_messages
 

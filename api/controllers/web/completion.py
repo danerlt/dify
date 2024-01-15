@@ -3,22 +3,21 @@ import json
 import logging
 from typing import Generator, Union
 
-from flask import Response, stream_with_context
-from flask_restful import reqparse
-from werkzeug.exceptions import InternalServerError, NotFound
-
 import services
 from controllers.web import api
-from controllers.web.error import AppUnavailableError, ConversationCompletedError, \
-    ProviderNotInitializeError, NotChatAppError, NotCompletionAppError, CompletionRequestError, \
-    ProviderQuotaExceededError, ProviderModelCurrentlyNotSupportError
+from controllers.web.error import (AppUnavailableError, CompletionRequestError, ConversationCompletedError,
+                                   NotChatAppError, NotCompletionAppError, ProviderModelCurrentlyNotSupportError,
+                                   ProviderNotInitializeError, ProviderQuotaExceededError)
 from controllers.web.wraps import WebApiResource
 from core.application_queue_manager import ApplicationQueueManager
 from core.entities.application_entities import InvokeFrom
-from core.errors.error import ProviderTokenNotInitError, QuotaExceededError, ModelCurrentlyNotSupportError
+from core.errors.error import ModelCurrentlyNotSupportError, ProviderTokenNotInitError, QuotaExceededError
 from core.model_runtime.errors.invoke import InvokeError
+from flask import Response, stream_with_context
+from flask_restful import reqparse
 from libs.helper import uuid_value
 from services.completion_service import CompletionService
+from werkzeug.exceptions import InternalServerError, NotFound
 
 
 # define completion api for user
@@ -64,7 +63,7 @@ class CompletionApi(WebApiResource):
         except ModelCurrentlyNotSupportError:
             raise ProviderModelCurrentlyNotSupportError()
         except InvokeError as e:
-            raise CompletionRequestError(str(e))
+            raise CompletionRequestError(e.description)
         except ValueError as e:
             raise e
         except Exception as e:
@@ -124,7 +123,7 @@ class ChatApi(WebApiResource):
         except ModelCurrentlyNotSupportError:
             raise ProviderModelCurrentlyNotSupportError()
         except InvokeError as e:
-            raise CompletionRequestError(str(e))
+            raise CompletionRequestError(e.description)
         except ValueError as e:
             raise e
         except Exception as e:
@@ -164,7 +163,7 @@ def compact_response(response: Union[dict, Generator]) -> Response:
             except ModelCurrentlyNotSupportError:
                 yield "data: " + json.dumps(api.handle_error(ProviderModelCurrentlyNotSupportError()).get_json()) + "\n\n"
             except InvokeError as e:
-                yield "data: " + json.dumps(api.handle_error(CompletionRequestError(str(e))).get_json()) + "\n\n"
+                yield "data: " + json.dumps(api.handle_error(CompletionRequestError(e.description)).get_json()) + "\n\n"
             except ValueError as e:
                 yield "data: " + json.dumps(api.handle_error(e).get_json()) + "\n\n"
             except Exception:
