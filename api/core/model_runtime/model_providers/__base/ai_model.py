@@ -10,7 +10,6 @@ from core.model_runtime.entities.model_entities import (AIModelEntity, DefaultPa
                                                         PriceConfig, PriceInfo, PriceType)
 from core.model_runtime.errors.invoke import InvokeAuthorizationError, InvokeError
 from core.model_runtime.model_providers.__base.tokenizers.gpt2_tokenzier import GPT2Tokenizer
-from pydantic import ValidationError
 
 
 class AIModel(ABC):

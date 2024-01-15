@@ -1,8 +1,6 @@
-import dashscope
-from dashscope import get_tokenizer
-
-from http import HTTPStatus
 from typing import Generator, List, Optional, Union
+
+from dashscope import get_tokenizer
 
 from core.model_runtime.entities.llm_entities import LLMResult, LLMResultChunk, LLMResultChunkDelta, LLMMode
 from core.model_runtime.entities.message_entities import (AssistantPromptMessage, PromptMessage, PromptMessageTool,
