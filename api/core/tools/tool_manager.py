@@ -112,7 +112,7 @@ class ToolManager:
         return tool
     
     @staticmethod
-    def get_tool(provider_type: str, provider_name: str, tool_name: str, tanent_id: str = None) \
+    def get_tool(provider_type: str, provider_id: str, tool_name: str, tanent_id: str = None) \
         -> Union[BuiltinTool, ApiTool]:
         """
             get the tool
@@ -124,11 +124,11 @@ class ToolManager:
             :return: the tool
         """
         if provider_type == 'builtin':
-            return ToolManager.get_builtin_tool(provider_name, tool_name)
+            return ToolManager.get_builtin_tool(provider_id, tool_name)
         elif provider_type == 'api':
             if tanent_id is None:
                 raise ValueError('tanent id is required for api provider')
-            api_provider, _ = ToolManager.get_api_provider_controller(tanent_id, provider_name)
+            api_provider, _ = ToolManager.get_api_provider_controller(tanent_id, provider_id)
             return api_provider.get_tool(tool_name)
         elif provider_type == 'app':
             raise NotImplementedError('app provider not implemented')
@@ -149,6 +149,15 @@ class ToolManager:
         """
         if provider_type == 'builtin':
             builtin_tool = ToolManager.get_builtin_tool(provider_name, tool_name)
+
+            # check if the builtin tool need credentials
+            provider_controller = ToolManager.get_builtin_provider(provider_name)
+            if not provider_controller.need_credentials:
+                return builtin_tool.fork_tool_runtime(meta={
+                    'tenant_id': tanent_id,
+                    'credentials': {},
+                })
+
             # get credentials
             builtin_provider: BuiltinToolProvider = db.session.query(BuiltinToolProvider).filter(
                 BuiltinToolProvider.tenant_id == tanent_id,
@@ -264,6 +273,7 @@ class ToolManager:
         # append builtin providers
         for provider in builtin_providers:
             result_providers[provider.identity.name] = UserToolProvider(
+                id=provider.identity.name,
                 author=provider.identity.author,
                 name=provider.identity.name,
                 description=I18nObject(
@@ -326,6 +336,7 @@ class ToolManager:
             credentails = db_api_provider.credentials
             provider_name = db_api_provider.name
             result_providers[provider_name] = UserToolProvider(
+                id=db_api_provider.id,
                 author=username,
                 name=db_api_provider.name,
                 description=I18nObject(
@@ -360,7 +371,7 @@ class ToolManager:
         return list(result_providers.values())
     
     @staticmethod
-    def get_api_provider_controller(tanent_id: str, provider_name: str) -> Tuple[ApiBasedToolProviderController, Dict[str, Any]]:
+    def get_api_provider_controller(tanent_id: str, provider_id: str) -> Tuple[ApiBasedToolProviderController, Dict[str, Any]]:
         """
             get the api provider
 
@@ -369,12 +380,12 @@ class ToolManager:
             :return: the provider controller, the credentials
         """
         provider: ApiToolProvider = db.session.query(ApiToolProvider).filter(
-            ApiToolProvider.name == provider_name,
+            ApiToolProvider.id == provider_id,
             ApiToolProvider.tenant_id == tanent_id,
         ).first()
 
         if provider is None:
-            raise ToolProviderNotFoundError(f'api provider {provider_name} not found')
+            raise ToolProviderNotFoundError(f'api provider {provider_id} not found')
         
         controller = ApiBasedToolProviderController.from_db(
             provider, ApiProviderAuthType.API_KEY if provider.credentials['auth_type'] == 'api_key' else ApiProviderAuthType.NONE

@@ -5,7 +5,7 @@ from typing import Union, Generator, Dict, Any, Tuple, List
 
 from core.model_runtime.entities.message_entities import PromptMessageTool, PromptMessage, UserPromptMessage,\
       SystemPromptMessage, AssistantPromptMessage, ToolPromptMessage
-from core.model_runtime.entities.llm_entities import LLMResultChunk
+from core.model_runtime.entities.llm_entities import LLMResultChunk, LLMResult, LLMUsage
 from core.model_manager import ModelInstance
 
 from core.tools.provider.tool import Tool
@@ -20,7 +20,7 @@ from models.model import Conversation, Message, MessageAgentThought
 
 logger = logging.getLogger(__name__)
 
-class AssistantCotApplicationRunner(BaseAssistantApplicationRunner):
+class AssistantFunctionCallApplicationRunner(BaseAssistantApplicationRunner):
     def run(self, model_instance: ModelInstance,
         conversation: Conversation,
         tool_instances: Dict[str, Tool],
@@ -29,20 +29,17 @@ class AssistantCotApplicationRunner(BaseAssistantApplicationRunner):
         query: str,
     ) -> Generator[LLMResultChunk, None, None]:
         """
-        Run Cot agent application
+        Run FunctionCall agent application
         """
         app_orchestration_config = self.app_orchestration_config
 
-        # get application generate entity
         prompt_template = self.app_orchestration_config.prompt_template.simple_prompt_template or ''
-
+        prompt_messages = self.history_prompt_messages
         prompt_messages = self.originze_prompt_messages(
             prompt_template=prompt_template,
             query=query,
+            prompt_messages=prompt_messages
         )
-
-        # recale llm max tokens
-        self.recale_llm_max_tokens(model_instance, prompt_messages)
 
         iteration_step = 1
         max_iteration_steps = 5
@@ -50,12 +47,28 @@ class AssistantCotApplicationRunner(BaseAssistantApplicationRunner):
         # continue to run until there is not any tool call
         function_call_state = True
         agent_thought: MessageAgentThought = None
+        llm_usage = {
+            'usage': None
+        }
+        final_answer = ''
+
+        def increse_usage(final_llm_usage_dict: Dict[str, LLMUsage], usage: LLMUsage):
+            if not final_llm_usage_dict['usage']:
+                final_llm_usage_dict['usage'] = usage
+            else:
+                llm_usage = final_llm_usage_dict['usage']
+                llm_usage.prompt_tokens += usage.prompt_tokens
+                llm_usage.completion_tokens += usage.completion_tokens
+                llm_usage.prompt_price += usage.prompt_price
+                llm_usage.completion_price += usage.completion_price
 
         while function_call_state and iteration_step <= max_iteration_steps:
-            function_call_state = False
             
+            function_call_state = False
+            # recale llm max tokens
+            self.recale_llm_max_tokens(self.model_config, prompt_messages)
             # invoke model
-            llm_result: Generator[LLMResultChunk, None, None] = model_instance.invoke_llm(
+            chunks: Generator[LLMResultChunk, None, None] = model_instance.invoke_llm(
                 prompt_messages=prompt_messages,
                 model_parameters=app_orchestration_config.model_config.parameters,
                 tools=prompt_messages_tools,
@@ -70,23 +83,29 @@ class AssistantCotApplicationRunner(BaseAssistantApplicationRunner):
             # save full response
             response = ''
 
-            for chunk in llm_result:
+            for chunk in chunks:
                 # check if there is any tool call
                 if self.check_tool_calls(chunk):
                     function_call_state = True
                     tool_calls.extend(self.extract_tool_calls(chunk))
 
-                for prompt_message in chunk.prompt_messages:
-                    if isinstance(prompt_message, AssistantPromptMessage):
-                        if prompt_message.content and prompt_message.content != '' \
-                              and isinstance(prompt_message.content, str):
-                            response += prompt_message.content
+                if chunk.delta.message and chunk.delta.message.content:
+                    if isinstance(chunk.delta.message.content, list):
+                        for content in chunk.delta.message.content:
+                            response += content.data
+                    else:
+                        response += chunk.delta.message.content
+
+                if chunk.delta.usage:
+                    increse_usage(llm_usage, chunk.delta.usage)
 
                 yield chunk
 
             if agent_thought is not None:
                 # save last agent thought's response
-                self.save_agent_thought(agent_thought, thought=None, answer=response)
+                self.save_agent_thought(agent_thought, thought=None, observation='', answer=response)
+
+            final_answer += response + '\n'
 
             # call tools
             tool_responses = []
@@ -108,7 +127,7 @@ class AssistantCotApplicationRunner(BaseAssistantApplicationRunner):
                         "tool_call_name": tool_call_name,
                         "tool_response": f"there is not a tool named {tool_call_name}"
                     })
-                    self.save_agent_thought(agent_thought, thought=None, answer=f"there is not a tool named {tool_call_name}")
+                    self.save_agent_thought(agent_thought, thought=None, observation='', answer=f"there is not a tool named {tool_call_name}")
                 else:
                     # invoke tool
                     error_response = None
@@ -133,7 +152,7 @@ class AssistantCotApplicationRunner(BaseAssistantApplicationRunner):
                         error_response = f"unknown error: {e}"
                     
                     if error_response:
-                        thought = error_response
+                        observation = error_response
                         logger.error(error_response)
                         tool_responses.append({
                             "tool_call_id": tool_call_id,
@@ -141,41 +160,43 @@ class AssistantCotApplicationRunner(BaseAssistantApplicationRunner):
                             "tool_response": error_response
                         })
                     else:
-                        thought = self._handle_tool_response(tool_response)
+                        observation = self._handle_tool_response(tool_response)
                         tool_responses.append({
                             "tool_call_id": tool_call_id,
                             "tool_call_name": tool_call_name,
                             "tool_response": self._handle_tool_response(tool_response)
                         })
                     
-                    self.save_agent_thought(agent_thought, thought=thought, answer='')
+                    self.save_agent_thought(agent_thought, thought='', observation=observation, answer='')
 
                 prompt_messages = self.originze_prompt_messages(
                     prompt_template=prompt_template,
-                    query=query,
+                    query=None,
                     tool_call_id=tool_call_id,
                     tool_call_name=tool_call_name,
-                    tool_response=tool_response,
+                    tool_response=self._handle_tool_response(tool_response),
                     prompt_messages=prompt_messages,
                 )
 
             iteration_step += 1
 
         # publish end event
-        self.queue_manager.publish_message_end()
+        self.queue_manager.publish_message_end(LLMResult(
+            model=model_instance.model,
+            prompt_messages=prompt_messages,
+            message=AssistantPromptMessage(
+                content=final_answer,
+            ),
+            usage=llm_usage['usage'],
+            system_fingerprint=''
+        ))
 
     def check_tool_calls(self, llm_result_chunk: LLMResultChunk) -> bool:
         """
         Check if there is any tool call in llm result chunk
         """
-        for prompt_message in llm_result_chunk.prompt_messages:
-            if isinstance(prompt_message, AssistantPromptMessage):
-                if not prompt_message.tool_calls:
-                    continue
-
-                if len(prompt_message.tool_calls) > 0:
-                    return True
-
+        if llm_result_chunk.delta.message.tool_calls:
+            return True
         return False
 
     def extract_tool_calls(self, llm_result_chunk: LLMResultChunk) -> Union[None, List[Tuple[str, str, Dict[str, Any]]]]:
@@ -186,13 +207,12 @@ class AssistantCotApplicationRunner(BaseAssistantApplicationRunner):
             List[Tuple[str, str, Dict[str, Any]]]: [(tool_call_id, tool_call_name, tool_call_args)]
         """
         tool_calls = []
-        for prompt_message in llm_result_chunk.prompt_messages:
-            if isinstance(prompt_message, AssistantPromptMessage):
-                for tool_call in prompt_message.tool_calls:
-                    try:
-                        tool_calls.append((tool_call.id, tool_call.function.name, json.loads(tool_call.function.arguments)))
-                    except Exception as e:
-                        logger.error(f"failed to parse tool call: {tool_call}")
+        for prompt_message in llm_result_chunk.delta.message.tool_calls:
+            tool_calls.append((
+                prompt_message.id,
+                prompt_message.function.name,
+                json.loads(prompt_message.function.arguments),
+            ))
 
         return tool_calls
     
@@ -212,16 +232,13 @@ class AssistantCotApplicationRunner(BaseAssistantApplicationRunner):
             ]
         else:
             if tool_response:
-                prompt_messages = prompt_messages.copy().append(
+                prompt_messages = prompt_messages.copy()
+                prompt_messages.append(
                     ToolPromptMessage(
                         content=tool_response,
                         tool_call_id=tool_call_id,
                         name=tool_call_name,
                     )
-                )
-            if query:
-                prompt_messages = prompt_messages.copy().append(
-                    UserPromptMessage(content=query)
                 )
 
         return prompt_messages
